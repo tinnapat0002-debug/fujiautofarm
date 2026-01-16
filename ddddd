@@ -1,0 +1,486 @@
+local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+
+local Window = Fluent:CreateWindow({
+    Title = "Auto Farm",
+    SubTitle = "by ZeroVertor101",
+    TabWidth = 160,
+    Size = UDim2.fromOffset(580, 460),
+    Acrylic = true,
+    Theme = "Dark",
+    MinimizeKey = Enum.KeyCode.LeftControl
+})
+
+local Tabs = {
+    Main = Window:AddTab({ Title = "Main", Icon = "box" }),
+    Misc = Window:AddTab({ Title = "Misc", Icon = "heart" })
+}
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local VirtualUser = game:GetService("VirtualUser")
+local player = Players.LocalPlayer
+
+local Char = player.Character or player.CharacterAdded:Wait()
+local hrp = Char:WaitForChild("HumanoidRootPart")
+
+local BoxFolder = workspace.Farm.Box
+
+-- ตัวแปรควบคุม
+local autoFarmEnabled = false
+local checkingStats = false
+local autoSellEnabled = true
+local antiAfkEnabled = true
+local lastSellTime = 0  -- เวลาขายล่าสุด
+local sellCooldown = 10  -- delay 10 วินาที
+
+--========================================================--
+--                    ANTI AFK SYSTEM                     
+--========================================================--
+
+-- ป้องกัน Kick จาก AFK
+local function setupAntiAFK()
+    -- ลบ Connection เดิมก่อน (ถ้ามี)
+    if getconnections then
+        for _, connection in pairs(getconnections(player.Idled)) do
+            connection:Disable()
+        end
+    end
+    
+    -- สร้าง Connection ใหม่
+    player.Idled:Connect(function()
+        if antiAfkEnabled then
+            VirtualUser:CaptureController()
+            VirtualUser:ClickButton2(Vector2.new())
+            print("🛡️ Anti AFK: Prevented kick!")
+        end
+    end)
+    
+    print("✅ Anti AFK System Enabled")
+end
+
+-- เรียกใช้ Anti AFK
+setupAntiAFK()
+
+-- Anti AFK เสริม (กดปุ่มทุก 5 นาที)
+task.spawn(function()
+    while true do
+        task.wait(300) -- 5 นาที
+        
+        if antiAfkEnabled then
+            pcall(function()
+                VirtualUser:CaptureController()
+                VirtualUser:ClickButton2(Vector2.new())
+                VirtualUser:Button1Down(Vector2.new(0, 0))
+                task.wait(0.1)
+                VirtualUser:Button1Up(Vector2.new(0, 0))
+                print("🛡️ Anti AFK: Activity simulated")
+            end)
+        end
+    end
+end)
+
+--========================================================--
+--                  MAIN FUNCTIONS
+--========================================================--
+
+-- ฟังก์ชันวาร์ปไปเกาะกล่อง
+local function ToBoxIsland()
+    if not hrp then return end
+    hrp.CFrame = CFrame.new(-1707.47729, -19.5721149, 1004.60181)
+    print("✅ Warped to Box Island")
+end
+
+-- ฟังก์ชันวาร์ปไปร้าน
+local function toShop()
+    if not hrp then return end
+    hrp.CFrame = CFrame.new(595.987793, 13.514061, -119.548019)
+    print("🏪 Warped to Shop")
+end
+
+-- ฟังก์ชันซื้ออาหาร
+local function buyFood()
+    print("💰 Buying food...")
+    
+    ReplicatedStorage.Remote.Shop:FireServer("BuyCash", "Coke", 1)
+    task.wait(1)
+    
+    ReplicatedStorage.Remote.Shop:FireServer("BuyCash", "Lunchbox", 1)
+    
+    print("✅ Food purchased!")
+    task.wait(3)
+end
+
+-- ฟังก์ชันกินอาหาร
+local function eatFood()
+    print("🍴 Eating food...")
+    
+    ReplicatedStorage.Remote.Inventory:FireServer("Use", "Coke")
+    task.wait(1)
+    
+    local ohString1 = "Use"
+    local ohString2 = "Lunchbox"
+
+    game:GetService("ReplicatedStorage").Remote.Inventory:FireServer(ohString1, ohString2)
+    task.wait(1)
+    
+    print("✅ Food consumed!")
+end
+
+
+local function sellBoxes()
+    pcall(function()
+        local currentTime = tick()
+        if currentTime - lastSellTime < sellCooldown then
+            return
+        end
+
+        local inventory = player:FindFirstChild("Inventory")
+        if not inventory then return end
+
+        local boxValue = inventory:FindFirstChild("Box")
+        if not boxValue then return end
+
+        local boxCount = boxValue.Value
+
+        print("📦 Current boxes: " .. boxCount)
+
+        if boxCount >= 60 then
+            print("💰 Selling boxes...")
+
+            -- วาร์ปไปจุดขาย
+            hrp.CFrame = CFrame.new(4441, 5, -2181)
+            task.wait(10)
+
+            -- ขายกล่อง
+            ReplicatedStorage.Remote.Economy:FireServer("Sell", "Box", "60")
+
+            -- อัปเดตเวลาขายล่าสุด
+            lastSellTime = tick()
+
+            print("✅ Sold 60 boxes!")
+
+            Fluent:Notify({
+                Title = "Auto Sell",
+                Content = "ขายกล่อง 60 ชิ้นแล้ว!",
+                Duration = 3
+            })
+
+            -- รอ 10 วินาที แล้ววาร์ปกลับไปฟาร์ม
+            task.wait(10)
+            ToBoxIsland()
+        end
+    end)
+end
+
+-- ฟังก์ชันเช็คและซื้อ/กินอาหาร
+local function checkAndEat()
+    pcall(function()
+        local status = player:FindFirstChild("Status")
+        if not status then return end
+        
+        local hunger = status:FindFirstChild("Hunger")
+        local thirsty = status:FindFirstChild("Thirsty")
+        
+        if not hunger or not thirsty then return end
+        
+        local hungerValue = hunger.Value
+        local thirstyValue = thirsty.Value
+        
+        print("📊 Hunger: " .. hungerValue .. " | Thirsty: " .. thirstyValue)
+        
+        -- ถ้าต่ำกว่า 20
+        if hungerValue < 20 or thirstyValue < 20 then
+            print("⚠️ Low stats detected! Going to shop...")
+            
+            toShop()
+            task.wait(2)
+            
+            buyFood()
+            task.wait(2)
+            
+            eatFood()
+            task.wait(2)
+            
+            print("🔄 Returning to farm...")
+            ToBoxIsland()
+            task.wait(1)
+        end
+    end)
+end
+
+-- ฟังก์ชันวาร์ปไปกล่อง
+local function tpBox()
+    for _, v in pairs(BoxFolder:GetChildren()) do
+        if not autoFarmEnabled then break end
+        
+        if v.Name == "Box" and v:IsA("BasePart") then
+            print("📦 Farming box: " .. v.Name)
+            hrp.CFrame = v.CFrame + Vector3.new(0, 3, 0)
+            task.wait(5)
+            
+            -- เช็คสถานะหลังเก็บกล่อง
+            checkAndEat()
+            
+            -- เช็คและขายกล่องถ้าครบ 60
+            if autoSellEnabled then
+                sellBoxes()
+            end
+        end
+    end
+end
+
+-- ฟังก์ชัน Auto Farm หลัก
+local function startAutoFarm()
+    while autoFarmEnabled do
+        task.wait(1)
+        
+        pcall(function()
+            Char = player.Character or player.CharacterAdded:Wait()
+            hrp = Char:WaitForChild("HumanoidRootPart")
+            
+            -- เช็คขายก่อนฟาร์มใหม่
+            if autoSellEnabled then
+                sellBoxes()
+            end
+            
+            ToBoxIsland()
+            task.wait(2)
+            
+            tpBox()
+            task.wait(2)
+        end)
+    end
+end
+
+-- ระบบเช็คสถานะอัตโนมัติ
+local function autoCheckStats()
+    while checkingStats do
+        task.wait(10)
+
+        if autoFarmEnabled then
+            checkAndEat()
+
+            -- เช็คขายกล่องด้วย
+            if autoSellEnabled then
+                sellBoxes()
+            end
+        end
+    end
+end
+
+--========================================================--
+--                  UI ELEMENTS - MAIN TAB                
+--========================================================--
+
+local Toggle = Tabs.Main:AddToggle("AutoFarm", {
+    Title = "Auto Farm Box",
+    Description = "เปิด/ปิด ระบบฟาร์มกล่องอัตโนมัติ",
+    Default = false
+})
+
+Toggle:OnChanged(function(value)
+    autoFarmEnabled = value
+    
+    if value then
+        print("🚀 Auto Farm Started!")
+        Fluent:Notify({
+            Title = "Auto Farm",
+            Content = "เริ่มระบบฟาร์มกล่อง!",
+            Duration = 3
+        })
+        
+        task.spawn(startAutoFarm)
+    else
+        print("⏹️ Auto Farm Stopped!")
+        Fluent:Notify({
+            Title = "Auto Farm",
+            Content = "หยุดระบบฟาร์มกล่อง!",
+            Duration = 3
+        })
+    end
+end)
+
+local AutoSellToggle = Tabs.Main:AddToggle("AutoSell", {
+    Title = "Auto Sell Box (60)",
+    Description = "ขายกล่องอัตโนมัติเมื่อมี 60 ชิ้น",
+    Default = true
+})
+
+AutoSellToggle:OnChanged(function(value)
+    autoSellEnabled = value
+    
+    if value then
+        Fluent:Notify({
+            Title = "Auto Sell",
+            Content = "เปิดระบบขายกล่องอัตโนมัติ!",
+            Duration = 2
+        })
+    else
+        Fluent:Notify({
+            Title = "Auto Sell",
+            Content = "ปิดระบบขายกล่องอัตโนมัติ!",
+            Duration = 2
+        })
+    end
+end)
+
+local AutoCheckToggle = Tabs.Main:AddToggle("AutoCheck", {
+    Title = "Auto Check Stats",
+    Description = "เช็คสถานะอัตโนมัติทุก 10 วินาที",
+    Default = true
+})
+
+AutoCheckToggle:OnChanged(function(value)
+    checkingStats = value
+    
+    if value then
+        task.spawn(autoCheckStats)
+    end
+end)
+
+-- ปุ่มวาร์ปด่วน
+Tabs.Main:AddButton({
+    Title = "Warp to Box Island",
+    Description = "วาร์ปไปเกาะกล่อง",
+    Callback = function()
+        ToBoxIsland()
+        Fluent:Notify({
+            Title = "Teleport",
+            Content = "วาร์ปไปเกาะกล่องแล้ว!",
+            Duration = 2
+        })
+    end
+})
+
+Tabs.Main:AddButton({
+    Title = "Warp to Shop",
+    Description = "วาร์ปไปร้าน",
+    Callback = function()
+        toShop()
+        Fluent:Notify({
+            Title = "Teleport",
+            Content = "วาร์ปไปร้านแล้ว!",
+            Duration = 2
+        })
+    end
+})
+
+Tabs.Main:AddButton({
+    Title = "Buy & Eat Food",
+    Description = "ซื้อและกินอาหารทันที",
+    Callback = function()
+        local currentPos = hrp.CFrame
+        toShop()
+        task.wait(1)
+        buyFood()
+        task.wait(1)
+        eatFood()
+        task.wait(1)
+        hrp.CFrame = currentPos
+        
+        Fluent:Notify({
+            Title = "Food",
+            Content = "ซื้อและกินอาหารเรียบร้อย!",
+            Duration = 2
+        })
+    end
+})
+
+Tabs.Main:AddButton({
+    Title = "Sell Boxes Now",
+    Description = "ขายกล่องทันที (60 ชิ้น)",
+    Callback = function()
+        sellBoxes()
+    end
+})
+
+-- แสดงสถานะปัจจุบัน
+local StatusSection = Tabs.Main:AddSection("Current Status")
+
+local BoxCountParagraph = Tabs.Main:AddParagraph({
+    Title = "Box Count",
+    Content = "Loading..."
+})
+
+task.spawn(function()
+    while true do
+        task.wait(2)
+        
+        pcall(function()
+            local status = player:FindFirstChild("Status")
+            local inventory = player:FindFirstChild("Inventory")
+            
+            if status and inventory then
+                local hunger = status:FindFirstChild("Hunger")
+                local thirsty = status:FindFirstChild("Thirsty")
+                local boxValue = inventory:FindFirstChild("Box")
+                
+                -- เช็คเลือด
+                local humanoid = Char:FindFirstChild("Humanoid")
+                local health = humanoid and math.floor(humanoid.Health) or 0
+                local maxHealth = humanoid and math.floor(humanoid.MaxHealth) or 100
+                
+                if hunger and thirsty and boxValue then
+                    local boxCount = boxValue.Value
+                    
+                    -- อัปเดตข้อความสถานะ
+                    BoxCountParagraph:SetTitle("Current Status")
+                    BoxCountParagraph:SetDesc(string.format(
+                        "📦 Boxes: %d/60\n💚 HP: %d/%d\n🍖 Hunger: %d\n💧 Thirsty: %d",
+                        boxCount,
+                        health,
+                        maxHealth,
+                        math.floor(hunger.Value),
+                        math.floor(thirsty.Value)
+                    ))
+                end
+            end
+        end)
+    end
+end)
+
+--========================================================--
+--                  UI ELEMENTS - MISC TAB
+--========================================================--
+
+Tabs.Misc:AddSection("Anti AFK System")
+
+local AntiAFKToggle = Tabs.Misc:AddToggle("AntiAFK", {
+    Title = "Anti AFK",
+    Description = "ป้องกันถูกเตะจาก AFK",
+    Default = true
+})
+
+AntiAFKToggle:OnChanged(function(value)
+    antiAfkEnabled = value
+    
+    if value then
+        Fluent:Notify({
+            Title = "Anti AFK",
+            Content = "เปิดระบบป้องกัน AFK!",
+            Duration = 2
+        })
+    else
+        Fluent:Notify({
+            Title = "Anti AFK",
+            Content = "ปิดระบบป้องกัน AFK!",
+            Duration = 2
+        })
+    end
+end)
+
+Tabs.Misc:AddParagraph({
+    Title = "Anti AFK Info",
+    Content = "ระบบจะจำลองการเคลื่อนไหวทุก 5 นาที\nป้องกันการถูกเตะจาก AFK อัตโนมัติ"
+})
+
+-- เริ่มระบบเช็คสถานะอัตโนมัติ
+checkingStats = true
+task.spawn(autoCheckStats)
+
+print("✅ Auto Farm Box Script Loaded!")
+Fluent:Notify({
+    Title = "Script Loaded",
+    Content = "Auto Farm Box พร้อมใช้งาน!\n🛡️ Anti AFK",
+    Duration = 5
+})
