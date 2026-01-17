@@ -32,6 +32,7 @@ local autoSellEnabled = true
 local antiAfkEnabled = true
 local lastSellTime = 0  -- เวลาขายล่าสุด
 local sellCooldown = 10  -- delay 10 วินาที
+local isBusy = false  -- ป้องกันการทำงานซ้อนทับ
 
 --========================================================--
 --                    ANTI AFK SYSTEM                     
@@ -129,6 +130,12 @@ end
 
 local function sellBoxes()
     pcall(function()
+        -- เช็คว่ากำลังทำอย่างอื่นอยู่หรือไม่
+        if isBusy then
+            print("⏳ Busy, skipping sell...")
+            return
+        end
+
         local currentTime = tick()
         if currentTime - lastSellTime < sellCooldown then
             return
@@ -145,6 +152,8 @@ local function sellBoxes()
         print("📦 Current boxes: " .. boxCount)
 
         if boxCount >= 60 then
+            -- ล็อคไม่ให้ทำอย่างอื่น
+            isBusy = true
             print("💰 Selling boxes...")
 
             -- วาร์ปไปจุดขาย
@@ -168,6 +177,9 @@ local function sellBoxes()
             -- รอ 10 วินาที แล้ววาร์ปกลับไปฟาร์ม
             task.wait(10)
             ToBoxIsland()
+
+            -- ปลดล็อค
+            isBusy = false
         end
     end)
 end
@@ -175,35 +187,47 @@ end
 -- ฟังก์ชันเช็คและซื้อ/กินอาหาร
 local function checkAndEat()
     pcall(function()
+        -- เช็คว่ากำลังทำอย่างอื่นอยู่หรือไม่
+        if isBusy then
+            print("⏳ Busy, skipping eat...")
+            return
+        end
+
         local status = player:FindFirstChild("Status")
         if not status then return end
-        
+
         local hunger = status:FindFirstChild("Hunger")
         local thirsty = status:FindFirstChild("Thirsty")
-        
+
         if not hunger or not thirsty then return end
-        
+
         local hungerValue = hunger.Value
         local thirstyValue = thirsty.Value
-        
+
         print("📊 Hunger: " .. hungerValue .. " | Thirsty: " .. thirstyValue)
-        
+
         -- ถ้าต่ำกว่า 20
         if hungerValue < 20 or thirstyValue < 20 then
+            -- ล็อคไม่ให้ทำอย่างอื่น
+            isBusy = true
             print("⚠️ Low stats detected! Going to shop...")
-            
+
             toShop()
-            task.wait(2)
-            
+            -- เพิ่ม delay 5-10 วินาที (ใช้ 7 วินาที)
+            task.wait(7)
+
             buyFood()
-            task.wait(2)
-            
+            task.wait(3)
+
             eatFood()
-            task.wait(2)
-            
+            task.wait(3)
+
             print("🔄 Returning to farm...")
             ToBoxIsland()
-            task.wait(1)
+            task.wait(2)
+
+            -- ปลดล็อค
+            isBusy = false
         end
     end)
 end
