@@ -81,14 +81,64 @@ task.spawn(function()
 end)
 
 --========================================================--
+--            BYPASS MOVEMENT (WALKING SIM)              
+--========================================================--
+local walkSpeedValue = 60 
+local RunService = game:GetService("RunService")
+
+local function walkToBypass(targetPos)
+    local char = player.Character
+    if not char or isBusy then return end 
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hrp or not hum then return end
+
+    local finalTarget = targetPos
+    local distance = (hrp.Position - finalTarget).Magnitude
+    
+    -- เพิ่มเงื่อนไข and not isBusy เพื่อให้หยุดเดินทันทีถ้าต้องไปขายของ
+    while distance > 0.5 and autoFarmEnabled and not isBusy do
+        RunService.Heartbeat:Wait()
+        
+        if isBusy or not hrp then break end -- เช็คซ้ำเพื่อความปลอดภัย
+        
+        local currentPos = hrp.Position
+        local direction = (finalTarget - currentPos).Unit
+        distance = (currentPos - finalTarget).Magnitude
+        
+        local nextPos = currentPos + (direction * (walkSpeedValue / 60))
+        
+        -- ล็อกความสูงตามพิกัดกล่อง + ป้องกันการตกแมพ
+        hrp.CFrame = CFrame.new(Vector3.new(nextPos.X, targetPos.Y, nextPos.Z))
+        hrp.CFrame = CFrame.lookAt(hrp.Position, Vector3.new(finalTarget.X, hrp.Position.Y, finalTarget.Z))
+        
+        hum:MoveTo(hrp.Position + direction)
+        
+        pcall(function()
+            for _, part in pairs(char:GetDescendants()) do
+                if part:IsA("BasePart") then part.CanCollide = false end
+            end
+        end)
+        hrp.Velocity = Vector3.new(0, 0, 0)
+    end
+    
+    if not isBusy then
+        hrp.CFrame = CFrame.new(targetPos) -- Snap เข้าหาพิกัดเป๊ะๆ
+    end
+end
+
+--========================================================--
 --                  MAIN FUNCTIONS
 --========================================================--
 
 -- ฟังก์ชันวาร์ปไปเกาะกล่อง
 local function ToBoxIsland()
-    if not hrp then return end
-    hrp.CFrame = CFrame.new(-1707.47729, -19.5721149, 1004.60181)
-    print("✅ Warped to Box Island")
+    local char = player.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if root then
+        root.CFrame = CFrame.new(-1707.47729, -19.5721149, 1004.60181)
+        print("✅ Warped to Box Island")
+    end
 end
 
 -- ฟังก์ชันวาร์ปไปร้าน
@@ -116,162 +166,170 @@ local function eatFood()
     print("🍴 Eating food...")
     
     ReplicatedStorage.Remote.Inventory:FireServer("Use", "Coke")
-    task.wait(1)
+    task.wait(15)
     
     local ohString1 = "Use"
     local ohString2 = "Lunchbox"
 
     game:GetService("ReplicatedStorage").Remote.Inventory:FireServer(ohString1, ohString2)
-    task.wait(1)
+    task.wait(15)
     
     print("✅ Food consumed!")
 end
 
 
 local function sellBoxes()
-    pcall(function()
-        -- เช็คว่ากำลังทำอย่างอื่นอยู่หรือไม่
-        if isBusy then
-            print("⏳ Busy, skipping sell...")
-            return
-        end
+    if isBusy then return end
 
-        local currentTime = tick()
-        if currentTime - lastSellTime < sellCooldown then
-            return
-        end
-
-        local inventory = player:FindFirstChild("Inventory")
-        if not inventory then return end
-
-        local boxValue = inventory:FindFirstChild("Box")
-        if not boxValue then return end
-
-        local boxCount = boxValue.Value
-
-        print("📦 Current boxes: " .. boxCount)
-
-        if boxCount >= 60 then
-            -- ล็อคไม่ให้ทำอย่างอื่น
-            isBusy = true
-            print("💰 Selling boxes...")
-
-            -- วาร์ปไปจุดขาย
-            hrp.CFrame = CFrame.new(4441, 5, -2181)
-            task.wait(10)
-
-            -- ขายกล่อง
+    local inventory = player:FindFirstChild("Inventory")
+    local boxValue = inventory and inventory:FindFirstChild("Box")
+    
+    if boxValue and boxValue.Value >= 60 then
+        isBusy = true
+        print("💰 [System] เริ่มขั้นตอนการขาย...")
+        
+        task.wait(0.5)
+        local root = player.Character:FindFirstChild("HumanoidRootPart")
+        if root then
+            root.CFrame = CFrame.new(4441, 5, -2181)
+            task.wait(7)
             ReplicatedStorage.Remote.Economy:FireServer("Sell", "Box", "60")
-
-            -- อัปเดตเวลาขายล่าสุด
-            lastSellTime = tick()
-
             print("✅ Sold 60 boxes!")
-
-            Fluent:Notify({
-                Title = "Auto Sell",
-                Content = "ขายกล่อง 60 ชิ้นแล้ว!",
-                Duration = 3
-            })
-
-            -- รอ 10 วินาที แล้ววาร์ปกลับไปฟาร์ม
-            task.wait(10)
+            lastSellTime = tick()
+            task.wait(3)
+            
             ToBoxIsland()
-
-            -- ปลดล็อค
-            isBusy = false
+            task.wait(2)
         end
-    end)
+        isBusy = false
+    end
 end
 
 -- ฟังก์ชันเช็คและซื้อ/กินอาหาร
 local function checkAndEat()
-    pcall(function()
-        -- เช็คว่ากำลังทำอย่างอื่นอยู่หรือไม่
-        if isBusy then
-            print("⏳ Busy, skipping eat...")
-            return
-        end
+    if isBusy then return end
 
-        local status = player:FindFirstChild("Status")
-        if not status then return end
+    local status = player:FindFirstChild("Status")
+    local hunger = status and status:FindFirstChild("Hunger")
+    local thirsty = status and status:FindFirstChild("Thirsty")
 
-        local hunger = status:FindFirstChild("Hunger")
-        local thirsty = status:FindFirstChild("Thirsty")
+    if hunger and thirsty and (hunger.Value < 50 or thirsty.Value < 50) then
+        isBusy = true -- ล็อกสถานะ
+        print("⚠️ [System] หิว/กระหาย ไปร้านค้า...")
 
-        if not hunger or not thirsty then return end
+        toShop()
+        task.wait(7)
 
-        local hungerValue = hunger.Value
-        local thirstyValue = thirsty.Value
+        -- วนซื้อ/กินจนกว่า Hunger และ Thirsty จะมากกว่า 50
+        while true do
+            -- อ่านค่าใหม่
+            status = player:FindFirstChild("Status")
+            hunger = status and status:FindFirstChild("Hunger")
+            thirsty = status and status:FindFirstChild("Thirsty")
 
-        print("📊 Hunger: " .. hungerValue .. " | Thirsty: " .. thirstyValue)
+            if not hunger or not thirsty then break end
 
-        -- ถ้าต่ำกว่า 20
-        if hungerValue < 20 or thirstyValue < 20 then
-            -- ล็อคไม่ให้ทำอย่างอื่น
-            isBusy = true
-            print("⚠️ Low stats detected! Going to shop...")
+            local hungerVal = hunger.Value
+            local thirstyVal = thirsty.Value
 
-            toShop()
-            -- เพิ่ม delay 5-10 วินาที (ใช้ 7 วินาที)
-            task.wait(7)
+            print("📊 Hunger: " .. hungerVal .. " | Thirsty: " .. thirstyVal)
 
+            -- ถ้าทั้งสองค่ามากกว่า 50 แล้ว หยุดกิน
+            if hungerVal > 50 and thirstyVal > 50 then
+                print("✅ สถานะเต็มแล้ว! กลับไปฟาร์ม...")
+                break
+            end
+
+            -- ซื้ออาหาร
             buyFood()
-            task.wait(3)
-
-            eatFood()
-            task.wait(3)
-
-            print("🔄 Returning to farm...")
-            ToBoxIsland()
             task.wait(2)
 
-            -- ปลดล็อค
-            isBusy = false
+            -- กินอาหาร
+            eatFood()
+            task.wait(2)
         end
-    end)
-end
 
--- ฟังก์ชันวาร์ปไปกล่อง
-local function tpBox()
-    for _, v in pairs(BoxFolder:GetChildren()) do
-        if not autoFarmEnabled then break end
-        
-        if v.Name == "Box" and v:IsA("BasePart") then
-            print("📦 Farming box: " .. v.Name)
-            hrp.CFrame = v.CFrame + Vector3.new(0, 3, 0)
-            task.wait(5)
-            
-            -- เช็คสถานะหลังเก็บกล่อง
-            checkAndEat()
-            
-            -- เช็คและขายกล่องถ้าครบ 60
-            if autoSellEnabled then
-                sellBoxes()
-            end
-        end
+        ToBoxIsland() -- วาร์ปกลับเกาะก่อนปลดล็อก
+        task.wait(2)
+        isBusy = false -- ปลดล็อก
     end
 end
 
--- ฟังก์ชัน Auto Farm หลัก
-local function startAutoFarm()
-    while autoFarmEnabled do
-        task.wait(1)
+-- ฟังก์ชันเดินเก็บกล่อง (เช็ค Transparency เพื่อความไวสูงสุด)
+local function tpBox()
+    -- ฟังก์ชันย่อยสำหรับหากล่องที่ใกล้ที่สุด
+    local function getClosestBox()
+        local closest = nil
+        local maxDist = math.huge
+        local char = player.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
         
-        pcall(function()
-            Char = player.Character or player.CharacterAdded:Wait()
-            hrp = Char:WaitForChild("HumanoidRootPart")
+        if not hrp then return nil end
+        
+        for _, v in pairs(BoxFolder:GetChildren()) do
+            if v.Name == "Box" and v:IsA("BasePart") then
+                -- เช็คก่อนว่ากล่องนั้นยังไม่หายไป (Transparency ต้องน้อยกว่า 1)
+                if v.Transparency < 1 then
+                    local dist = (v.Position - hrp.Position).Magnitude
+                    if dist < maxDist then
+                        maxDist = dist
+                        closest = v
+                    end
+                end
+            end
+        end
+        return closest
+    end
+
+    -- ลูปฟาร์มต่อเนื่อง
+    while autoFarmEnabled and not isBusy do
+        local targetBox = getClosestBox()
+        
+        if targetBox then
+            print("🚶 กำลังเดินไปหากล่อง: " .. targetBox.Name)
             
-            -- เช็คขายก่อนฟาร์มใหม่
-            if autoSellEnabled then
-                sellBoxes()
+
+            walkToBypass(targetBox.Position)
+            
+
+            print("⏳ กำลังเก็บกล่อง... รอจนกว่าจะหายไป")
+            
+            local timeout = 0
+
+            while targetBox and targetBox.Parent and targetBox.Transparency < 1 and autoFarmEnabled do
+                task.wait(0.1)
+                timeout = timeout + 0.1
+                
+
+                if timeout > 15 then break end 
             end
             
-            ToBoxIsland()
-            task.wait(2)
+            print("✅ กล่องหายไปแล้ว! ไปต่อ...")
             
-            tpBox()
-            task.wait(2)
+            -- 3. เช็คสถานะตัวละคร
+            checkAndEat()
+            if autoSellEnabled then 
+                sellBoxes() 
+            end
+        else
+            -- ถ้าไม่มีกล่องที่เก็บได้เลย ให้รอ 1 วินาทีแล้วหาใหม่
+            task.wait(1)
+        end
+    end
+end
+-- ฟังก์ชัน Auto Farm หลัก (เช็กระยะห่างก่อนวาร์ปไปเกาะ)
+local function startAutoFarm()
+    while autoFarmEnabled do
+        task.wait(0.5)
+        pcall(function()
+            local char = player.Character
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            if not isBusy then
+                local islandPos = Vector3.new(-1707.47, -19.57, 1004.60)
+                    ToBoxIsland()
+                    task.wait(1)
+                tpBox()
+            end
         end)
     end
 end
